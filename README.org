@@ -9,7 +9,7 @@ This is how I use R, some command line utilities, and imagemagick to get IODP co
 - [[https://imagemagick.org/][imagemagick]]
 - the develpment R package [[https://github.com/clauswilke/ggtextures][ggtextures]]
 
-* R libraries
+** R libraries
 #+begin_src R
   library(stringr)
   library(dplyr)
@@ -18,16 +18,16 @@ This is how I use R, some command line utilities, and imagemagick to get IODP co
   library(readr)
 #+end_src
 
-* get image links function
-Our core photographs are hosted on the [[http://iodp.tamu.edu/janusweb/imaging/photo.shtml][janus database]]
+* download the images and section depth
+IODP info is available on [[http://iodp.tamu.edu/][the IODP website]]
 
-For older core images (before leg 198) we need the url:
-http://www-odp.tamu.edu/publications/###_IR/VOLUME/CORES/IMAGES
-to get PDFs of the whole core, sections laid out next to each other.
+- Core data from all ODP, DSDP and IOD expedition 301--312 data are available on the [[http://iodp.tamu.edu/janusweb/imaging/photo.shtml][janus database]]
+  - For older core images (before leg 198) we need the url: http://www-odp.tamu.edu/publications/###_IR/VOLUME/CORES/IMAGES to get PDFs of the whole core, sections laid out next to each other.
+  - There is also a newer file format called MrDIT, but this was too hard to get to work.
+- Core data for all newer IODP expeditions from 317--present are available in the [[http://web.iodp.tamu.edu/LORE/][LORE database]].
 
-There is also a newer file format called MrDIT, but this was too hard to get to work.
-
-There also appear to be hidden jpg files per section for the newer sites, e.g.:
+** get image files/links from the janus database
+In this example setup we're looking at Expedition 208, Site 1264. After some digging around on the janus database, we find that the JPG images are hosted with a regular url:
 http://www-odp.tamu.edu/publications/208_IR/VOLUME/CORES/JPEG/1264B/1264b_026h/1264b_026h_06.jpg
 
 These are the ones I'll be using.
@@ -54,7 +54,7 @@ This function converts leg, site, hole, etc. data to create the URL to the image
 : http://www-odp.tamu.edu/publications/208_IR/VOLUME/CORES/JPEG/1264C/1264c_001h/1264c_001h_02.jpg
 : http://www-odp.tamu.edu/publications/208_IR/VOLUME/CORES/JPEG/1264B/1264b_026h/1264b_026h_06.jpg
 
-* get core/section/depth info
+*** get core/section/depth info
 This section is probably something that you need to tweak some more for your use-case.
 
 In the end, you need the IODP core info up to the section level. Each sections hould have a ~top_depth~ (in mbsf, mcd, or armcd) and ~bot_depth~.
@@ -93,8 +93,7 @@ In the end, you need the IODP core info up to the section level. Each sections h
                                   image_type="JPEG"))
 #+end_src
 
-* download and process the images
-** download the images so I can crop them
+*** download the images so I can crop them
 We create a directory where we save all the pretty large jpg images. For walvis ridge, this takes quite a while: 4 minutes and 30 seconds to download 455 files.
 
 This is the part where you have to have bash or another shell with the cat, awk, grep, and wget utilities installed.
@@ -114,6 +113,36 @@ FINISHED --2020-11-09 12:02:14--
 Total wall clock time: 5m 48s
 Downloaded: 455 files, 1.2G in 4m 30s (4.57 MB/s)
 
+** get core/section/depth info for a newer site
+If you are working with a newer core, good on you! It's much easier to get those data in shape!
+
+1. Go to http://web.iodp.tamu.edu/LORE/ in a modern browser
+2. In the left menu, click on "images"
+3. click "Core Sections (LSIMG)"
+4. click "standard"
+5. in the filtering view, filter by your site/core/section as desired
+6. optional: click an alternate depth scale
+7. click "View data"
+8. click "Download tabular data" to save the csv with the metadata
+9. click "Batch download linked files" to save the jpg images
+10. Choose "cropped images"
+
+We can merge the file paths with the metadata by their image link:
+
+#+begin_src R :eval never
+  cp <- read_csv("dat/core_site_pictures.csv")
+
+  # list all the downloaded jpg files
+  fl <- tibble(file = list.files("dat/corepics", pattern=".jpg")) %>%
+    # I'm assuming that these ID's are unique here
+    mutate(id = str_extract(file, "[0-9]+.jpg$") %>% str_replace(".jpg", "") %>% parse_double())
+
+  cp <- cp %>%
+    # merge the file info (section depth etc.) with the image name
+    left_join(fl, by = c("Cropped image (JPG) link" = "id")) %>%
+    mutate(file = str_replace(file, ".jpg", ".png"))
+#+end_src
+
 ** resize and crop the images
 The images are much too large to load into memory all at once, so we downsize and crop them all.
 
@@ -123,6 +152,7 @@ The target width at 300 dpi if we want to plot it at half a cm:
 #+end_src
 
 #+RESULTS:
+
 : [1] 59.05512
 
 Use magick's mogrify to batch resize and crop the images. Play around with the magick commandline options to get the cropping correct.
@@ -130,11 +160,11 @@ Use magick's mogrify to batch resize and crop the images. Play around with the m
   system("mogrify -resize 60 -crop -17-54 -format png 1264_corepics/*.jpg")
 #+end_src
 
-* add file paths to small images
+** add file paths to small images
 #+begin_src R
   cm <- cm %>%
     mutate(file = paste0("1264_corepics/", basename(url) %>% str_replace(".jpg", ".png")),
-           # some of the sections don't have images
+           # some of the sections don't have images, or our download failed perhaps?
            file_exists = !is.na(file.info(cm$file)$size),
            file = ifelse(file_exists, file, NA_character_))
 #+end_src
