@@ -21,7 +21,7 @@ This is how I use R, some command line utilities, and imagemagick to get IODP co
 * download the images and section depth
 IODP info is available on [[http://iodp.tamu.edu/][the IODP website]]
 
-- Core data from all ODP, DSDP and IOD expedition 301--312 data are available on the [[http://iodp.tamu.edu/janusweb/imaging/photo.shtml][janus database]]
+- Core data from all ODP, DSDP and IODP expedition 301--312 data are available on the [[http://iodp.tamu.edu/janusweb/imaging/photo.shtml][janus database]]
   - For older core images (before leg 198) we need the url: http://www-odp.tamu.edu/publications/###_IR/VOLUME/CORES/IMAGES to get PDFs of the whole core, sections laid out next to each other.
   - There is also a newer file format called MrDIT, but this was too hard to get to work.
 - Core data for all newer IODP expeditions from 317--present are available in the [[http://web.iodp.tamu.edu/LORE/][LORE database]].
@@ -113,7 +113,7 @@ FINISHED --2020-11-09 12:02:14--
 Total wall clock time: 5m 48s
 Downloaded: 455 files, 1.2G in 4m 30s (4.57 MB/s)
 
-** get core/section/depth info for a newer site
+** get core/section/depth info from the LORE database
 If you are working with a newer core, good on you! It's much easier to get those data in shape!
 
 1. Go to http://web.iodp.tamu.edu/LORE/ in a modern browser
