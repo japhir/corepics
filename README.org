@@ -1,0 +1,241 @@
+#+TITLE: CorePics
+#+property: header-args:R  :session *R:corepics* :exports both :results output :eval no-export
+
+This is how I use R, some command line utilities, and imagemagick to get IODP core photographs in a reduced size into my scientific figures!
+
+* what you need
+- [[R][R]]
+- [[https://www.gnu.org/software/bash/][bash]] or another command line shell
+- [[https://imagemagick.org/][imagemagick]]
+- the develpment R package [[https://github.com/clauswilke/ggtextures][ggtextures]]
+
+* R libraries
+#+begin_src R
+  library(stringr)
+  library(dplyr)
+  library(glue)
+  library(readxl)
+  library(readr)
+#+end_src
+
+* get image links function
+Our core photographs are hosted on the [[http://iodp.tamu.edu/janusweb/imaging/photo.shtml][janus database]]
+
+For older core images (before leg 198) we need the url:
+http://www-odp.tamu.edu/publications/###_IR/VOLUME/CORES/IMAGES
+to get PDFs of the whole core, sections laid out next to each other.
+
+There is also a newer file format called MrDIT, but this was too hard to get to work.
+
+There also appear to be hidden jpg files per section for the newer sites, e.g.:
+http://www-odp.tamu.edu/publications/208_IR/VOLUME/CORES/JPEG/1264B/1264b_026h/1264b_026h_06.jpg
+
+These are the ones I'll be using.
+
+This function converts leg, site, hole, etc. data to create the URL to the image.
+#+begin_src R
+  create_image_url <- function(leg, site, hole, core, type = "H", section, image_type = "JPEG", extension = ".jpg") {
+    base_url <- "http://www-odp.tamu.edu/publications/"
+    core_padded <- str_pad(core, 3, pad = 0)
+    type_l <- str_to_lower(type)
+    sec <- section %>% str_to_lower() %>% str_pad(2, pad=0)
+    glue("{base_url}{leg}_IR/VOLUME/CORES/{image_type}/{site}{hole}/{site}{str_to_lower(hole)}_{core_padded}{type_l}/{site}{str_to_lower(hole)}_{core_padded}{type_l}_{sec}{extension}")
+  }
+
+  # some tests
+  create_image_url(leg = 208, site = 1264, hole = "B", core = 30, type = "H", section = "CC")
+  create_image_url(leg = 208, site = 1264, hole = "C", core = 1, type = "H", section = 2)
+  create_image_url(leg = 208, site = 1264, hole = "B", core = 26, type = "H", section = 6)
+#+end_src
+
+#+RESULTS:
+
+: http://www-odp.tamu.edu/publications/208_IR/VOLUME/CORES/JPEG/1264B/1264b_030h/1264b_030h_cc.jpg
+: http://www-odp.tamu.edu/publications/208_IR/VOLUME/CORES/JPEG/1264C/1264c_001h/1264c_001h_02.jpg
+: http://www-odp.tamu.edu/publications/208_IR/VOLUME/CORES/JPEG/1264B/1264b_026h/1264b_026h_06.jpg
+
+* get core/section/depth info
+This section is probably something that you need to tweak some more for your use-case.
+
+In the end, you need the IODP core info up to the section level. Each sections hould have a ~top_depth~ (in mbsf, mcd, or armcd) and ~bot_depth~.
+
+#+begin_src R
+  # this is the affine table, with the recovery and adjusted depths of the cores
+  md <- read_excel("~/SurfDrive/PhD/sites/site_1264_walvisridge/208 1264 Composite.xlsx",
+                   sheet = "Affine Table", range = "A1:S31") %>% # hole A
+    # I combine the info for the three holes
+    bind_rows(read_excel("~/SurfDrive/PhD/sites/site_1264_walvisridge/208 1264 Composite.xlsx",
+                         sheet = "Affine Table", range = "A33:S63")) %>% # hole B
+    bind_rows(read_excel("~/SurfDrive/PhD/sites/site_1264_walvisridge/208 1264 Composite.xlsx",
+                         sheet = "Affine Table", range = "A65:S66")) # hole C
+
+  # now I need the recovered depth per section from somewhere
+  sd <- read_tsv("~/SurfDrive/PhD/programming/iodp_read_info/data/208-1264/sections/208_1264_sections.txt",
+                 skip = 2) %>%
+    rename_all(str_to_lower)
+
+  # combine the metadata and clean up
+  cm <- left_join(sd, md, by = c("expedition" = "Leg",
+                                 "site" = "Site",
+                                 "hole" = "H",
+                                 "core" = "Cor",
+                                 "core_type" = "T")) %>%
+    mutate(armcd_top = `New Cum Offset` + top_depth,
+           armcd_bot = `New Cum Offset` + bottom_depth) %>%
+    select(expedition:core_type, section_label, top_depth, rev_length, armcd_top, armcd_bot) %>%
+    # here we create the image url based on the metadata
+    mutate(url = create_image_url(leg=expedition,
+                                  site=site,
+                                  hole=hole,
+                                  core=core,
+                                  type=core_type,
+                                  section=section_label,
+                                  image_type="JPEG"))
+#+end_src
+
+* download and process the images
+** download the images so I can crop them
+We create a directory where we save all the pretty large jpg images. For walvis ridge, this takes quite a while: 4 minutes and 30 seconds to download 455 files.
+
+This is the part where you have to have bash or another shell with the cat, awk, grep, and wget utilities installed.
+#+begin_src R
+  dir <- "1264_corepics"
+  dir.create(dir)
+
+  # save the clean metadata to a tsv so we can use awk to work with it
+  write_tsv(cm, "cm.txt")
+
+  # download the corepics
+  system("cat cm.txt | awk '{ print $11 }' | grep '^http' | wget -P 1264_corepics -i-")
+#+end_src
+
+#+RESULTS:
+FINISHED --2020-11-09 12:02:14--
+Total wall clock time: 5m 48s
+Downloaded: 455 files, 1.2G in 4m 30s (4.57 MB/s)
+
+** resize and crop the images
+The images are much too large to load into memory all at once, so we downsize and crop them all.
+
+The target width at 300 dpi if we want to plot it at half a cm:
+#+begin_src R
+ 300 / 2.54 * .5 # 300 dpi in cm, for half a cm
+#+end_src
+
+#+RESULTS:
+: [1] 59.05512
+
+Use magick's mogrify to batch resize and crop the images. Play around with the magick commandline options to get the cropping correct.
+#+begin_src R
+  system("mogrify -resize 60 -crop -17-54 -format png 1264_corepics/*.jpg")
+#+end_src
+
+* add file paths to small images
+#+begin_src R
+  cm <- cm %>%
+    mutate(file = paste0("1264_corepics/", basename(url) %>% str_replace(".jpg", ".png")),
+           # some of the sections don't have images
+           file_exists = !is.na(file.info(cm$file)$size),
+           file = ifelse(file_exists, file, NA_character_))
+#+end_src
+
+* plot the smaller images on the correct locations
+#+begin_src R :results output graphics file :file 1264_corepics.png :width 200 :height 1600
+  cm %>%
+    ggplot(aes(y = armcd_bot, xmin = 0L, xmax = 1L, ymin = armcd_bot, ymax = armcd_top, image = file)) +
+    geom_rect(alpha = .2) +
+    ## coord_cartesian(ylim = c(17, 3)) +
+    geom_textured_rect(colour = NA, nrow = 1, ncol = 1, img_width = unit(1, "null"), img_height = unit(1, "null")) +
+    facet_grid(cols = vars(hole)) +
+    scale_y_reverse() +
+    labs(title="IODP Leg 208 Site 1264", subtitle = "core photographs", caption = "created by Ilja Kocken") +
+    theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+          panel.grid = element_blank()) -> pl
+  pl
+#+end_src
+
+#+RESULTS:
+
+[[file:1264_corepics.png]]
+
+* combine the core photographs with your figures
+To do this, I recommend the patchwork package. Make sure to set the exact same y-axis for both plots.
+
+#+begin_src R
+  cm %>%
+    ggplot(aes(y = armcd_bot, xmin = 0L, xmax = 1L, ymin = armcd_bot, ymax = armcd_top, image = file)) +
+    geom_rect(alpha = .2) +
+    coord_cartesian(ylim = c(17, 3)) +
+    geom_textured_rect(colour = NA, nrow = 1, ncol = 1, img_width = unit(1, "null"), img_height = unit(1, "null")) +
+    facet_grid(cols = vars(hole)) +
+    scale_y_reverse() +
+    theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+          panel.grid = element_blank()) -> pl
+
+  cm %>%
+    mutate(D47 = rnorm(n(), mean = 0.76, sd = 0.2)) %>%
+    ggplot(aes(x = D47, y = armcd_bot)) +
+    scale_y_reverse() +
+    coord_cartesian(ylim = c(17, 3)) +
+    theme(axis.title.y = element_blank(), axis.text.y = element_blank()) +
+    geom_point() -> pl2
+#+end_src
+
+#+begin_src R :results output graphics file :file 1264_corepics_with_data.png :width 500 :height 600
+  library(patchwork)
+
+  pc <- (pl + pl2) + plot_layout(widths = c(.1, .9))
+  pc
+#+end_src
+
+#+RESULTS:
+
+[[file:1264_corepics_with_data.png]]
+
+** putting the depth on the x-axis
+If you need to put the depth on the x-axis, the images need to be rotated. Make sure you rotate them in the correct way! If you want to put greater depths to the right, rotate the images 90° anti-clockwise, like so:
+
+#+begin_src R :eval never
+  system("mogrify -rotate -90 1264_corepics/*.png")
+#+end_src
+
+#+RESULTS:
+
+If you want to put the deeper sediments to the left, so that time progresses from left to right, rotate them by +90°.
+
+#+begin_src R
+  system("mogrify -rotate 90 1264_corepics/*.png")
+#+end_src
+
+#+RESULTS:
+
+#+begin_src R
+  cm %>%
+    ggplot(aes(x = armcd_bot, ymin = 0L, ymax = 1L, xmin = armcd_bot, xmax = armcd_top, image = file)) +
+    geom_rect(alpha = .2) +
+    coord_cartesian(xlim = c(17, 3)) +
+    geom_textured_rect(colour = NA, nrow = 1, ncol = 1, img_width = unit(1, "null"), img_height = unit(1, "null")) +
+    facet_grid(rows = vars(hole)) +
+    ## scale_x_reverse() +
+    theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+          panel.grid = element_blank()) -> pl
+
+  cm %>%
+    mutate(D47 = rnorm(n(), mean = 0.76, sd = 0.2)) %>%
+    ggplot(aes(y = D47, x = armcd_bot)) +
+    scale_y_reverse() +
+    coord_cartesian(xlim = c(17, 3)) +
+    theme(axis.title.x = element_blank(), axis.text.x = element_blank()) +
+    geom_point() -> pl2
+#+end_src
+
+#+RESULTS:
+
+#+begin_src R :results output graphics file :file 1264_corepics_with_data_on_x-axis.png :width 600 :height 500
+  pc <- (pl2/pl) + plot_layout(heights = c(.9, .1))
+  pc
+#+end_src
+
+#+RESULTS:
+
+[[file:1264_corepics_with_data_on_x-axis.png]]
