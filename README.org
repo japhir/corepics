@@ -1,3 +1,5 @@
+[[file:1411_corepics.png]]
+
 #+TITLE: CorePics
 #+property: header-args:R  :session *R:corepics* :exports both :results output :eval no-export
 
@@ -16,7 +18,13 @@ This is how I use R, some command line utilities, and imagemagick to get IODP co
   library(glue)
   library(readxl)
   library(readr)
+  ## library(ggtextures)
+  devtools::load_all("~/Downloads/ggtextures")
 #+end_src
+
+#+RESULTS:
+
+: Loading ggtextures
 
 * download the images and section depth
 IODP info is available on [[http://iodp.tamu.edu/][the IODP website]]
@@ -109,6 +117,7 @@ This is the part where you have to have bash or another shell with the cat, awk,
 #+end_src
 
 #+RESULTS:
+
 FINISHED --2020-11-09 12:02:14--
 Total wall clock time: 5m 48s
 Downloaded: 455 files, 1.2G in 4m 30s (4.57 MB/s)
@@ -143,6 +152,8 @@ We can merge the file paths with the metadata by their image link:
     mutate(file = str_replace(file, ".jpg", ".png"))
 #+end_src
 
+The image at the top is the result of reading in and combining data for IODP site U1411 using this method! Don't forget the next cropping step though, or your computer might crash.
+
 ** resize and crop the images
 The images are much too large to load into memory all at once, so we downsize and crop them all.
 
@@ -163,9 +174,9 @@ Use magick's mogrify to batch resize and crop the images. Play around with the m
 ** add file paths to small images
 #+begin_src R
   cm <- cm %>%
-    mutate(file = paste0("1264_corepics/", basename(url) %>% str_replace(".jpg", ".png")),
-           # some of the sections don't have images, or our download failed perhaps?
-           file_exists = !is.na(file.info(cm$file)$size),
+    mutate(file = paste0("1264_corepics/", basename(url) %>% str_replace(".jpg", ".png"))) %>%
+    # some of the sections don't have images, or our download failed perhaps?
+    mutate(file_exists = !is.na(file.info(file)$size),
            file = ifelse(file_exists, file, NA_character_))
 #+end_src
 
@@ -175,7 +186,7 @@ Use magick's mogrify to batch resize and crop the images. Play around with the m
     ggplot(aes(y = armcd_bot, xmin = 0L, xmax = 1L, ymin = armcd_bot, ymax = armcd_top, image = file)) +
     geom_rect(alpha = .2) +
     ## coord_cartesian(ylim = c(17, 3)) +
-    geom_textured_rect(colour = NA, nrow = 1, ncol = 1, img_width = unit(1, "null"), img_height = unit(1, "null")) +
+    geom_textured_rect(colour = NA, nrow = 1, ncol = 1, img_width = unit(1, "null"), img_height = unit(1, "null"), interpolate = FALSE) +
     facet_grid(cols = vars(hole)) +
     scale_y_reverse() +
     labs(title="IODP Leg 208 Site 1264", subtitle = "core photographs", caption = "created by Ilja Kocken") +
@@ -196,7 +207,7 @@ To do this, I recommend the patchwork package. Make sure to set the exact same y
     ggplot(aes(y = armcd_bot, xmin = 0L, xmax = 1L, ymin = armcd_bot, ymax = armcd_top, image = file)) +
     geom_rect(alpha = .2) +
     coord_cartesian(ylim = c(17, 3)) +
-    geom_textured_rect(colour = NA, nrow = 1, ncol = 1, img_width = unit(1, "null"), img_height = unit(1, "null")) +
+    geom_textured_rect(colour = NA, nrow = 1, ncol = 1, img_width = unit(1, "null"), img_height = unit(1, "null"), interpolate = FALSE) +
     facet_grid(cols = vars(hole)) +
     scale_y_reverse() +
     theme(axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank(),
@@ -244,7 +255,7 @@ If you want to put the deeper sediments to the left, so that time progresses fro
     ggplot(aes(x = armcd_bot, ymin = 0L, ymax = 1L, xmin = armcd_bot, xmax = armcd_top, image = file)) +
     geom_rect(alpha = .2) +
     coord_cartesian(xlim = c(17, 3)) +
-    geom_textured_rect(colour = NA, nrow = 1, ncol = 1, img_width = unit(1, "null"), img_height = unit(1, "null")) +
+    geom_textured_rect(colour = NA, nrow = 1, ncol = 1, img_width = unit(1, "null"), img_height = unit(1, "null"), interpolate = FALSE) +
     facet_grid(rows = vars(hole)) +
     ## scale_x_reverse() +
     theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank(),
